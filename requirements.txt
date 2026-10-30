@@ -1,0 +1,16 @@
+# Librerie necessarie, con le versioni con cui il progetto è stato provato.
+langchain==1.4.7
+langchain-core==1.7.3
+langchain-community==0.4.2
+langchain-text-splitters==1.1.3
+langgraph==1.2.18
+langgraph-checkpoint-sqlite==3.1.2
+langchain-google-genai==4.4.2
+langchain-ollama==1.1.0
+langchain-chroma==1.1.0
+chromadb==1.5.9
+pypdf==6.21.4
+streamlit==1.66.1
+pandas==3.1.0
+python-dotenv==1.2.4
+pytest==9.2.0
