@@ -4,7 +4,7 @@ Progetto finale del corso **Agenti AI: automazione e sviluppo**
 
 Assistente basato su LLM per chi vive in affitto con altri:
 
-- **tiene i conti di casa**: capisce spese scritte in modo normale ("ho fatto la spesa, 54€, tutti tranne Luca"), calcola chi deve quanto a chi, elimina spese sbagliate e prepara solleciti (simulati), chiedendo sempre conferma prima delle azioni delicate;
+- **tiene i conti di casa**: capisce spese scritte in modo normale, anche più di una per messaggio, con date ("ieri") e divisioni in percentuale ("ho fatto la spesa, 54€, tutti tranne Luca"); calcola chi deve quanto a chi, i debiti tra due persone e i totali spesi; registra i debiti saldati, elimina spese sbagliate e prepara solleciti (simulati), chiedendo sempre conferma prima delle azioni delicate (anche per cambiare i coinquilini o le regole della casa);
 - **risponde a domande** su affitto, contratti, caparra, bollette, condominio e convivenza, cercando in 8 documenti e citando le fonti.
 
 Le scelte progettuali, con motivazioni e alternative scartate, sono in **[DECISIONI.md](DECISIONI.md)**.
@@ -65,7 +65,12 @@ Si apre il browser su http://localhost:8501. Al primo avvio l'assistente indiciz
    - `ho fatto la spesa al Carrefour, 54 euro, per tutti tranne Luca`
    - `detersivi 20€, io 12 e Giulia 8`
    - `Marco mi ha ridato 18 euro`
+   - `ieri pizza 20€ e birre 10€ per tutti`
+   - `garage 80€, io 60% e Giulia 40%`
    - `chi deve soldi a chi?`
+   - `quanto devo a Giulia?`
+   - `quanto abbiamo speso questo mese?`
+   - `Giulia e Marco hanno saldato il debito con me, Luca no`
    - `cancella la spesa dei detersivi`
    - `manda un sollecito gentile a Giulia`
    - `ricordati che Luca è in Erasmus fino a giugno`
@@ -79,14 +84,15 @@ python main.py
 python main.py --provider ollama
 ```
 
-Comandi: `/saldi`, `/nuova` (nuova conversazione), `/chi` (cambia utente), `/esci`.
+Comandi: `/debiti` (chi deve quanto a chi), `/nuova` (nuova conversazione), `/chi` (cambia utente), `/esci`.
 
 ### Altri comandi utili
 
 ```bash
-python rag.py  # ricostruisce l'indice dei documenti (dopo averli modificati)
+python rag.py  # ricostruisce l'indice dei documenti: va lanciato a mano ogni volta che un documento
+               # viene aggiunto, modificato o tolto (poi riavvia l'assistente)
 python valutazione.py   # valutazione automatica: estrazione spese + ricerca nei documenti
-python -m pytest -q  # 45 test automatici (non serve la chiave API)
+python -m pytest -q  # 92 test automatici (non serve la chiave API)
 ```
 
 ### LangSmith (facoltativo)
@@ -111,9 +117,9 @@ assistente-casa/
 ├── prompt.py            tutte le istruzioni per il modello (few-shot, ruoli, RAG)
 ├── schemi.py            le "schede" per l'output strutturato
 ├── strumenti.py         gli strumenti (tool) e le regole sulle azioni delicate
-├── calcoli.py           conti esatti: quote, saldi, pagamenti per pareggiare
-├── archivio.py          archivio SQLite della casa (memoria a lungo termine)
-├── rag.py               preparazione dell'indice e ricerca nei documenti
+├── calcoli.py           conti esatti: quote, percentuali, debiti diretti tra persone
+├── archivio.py          archivio SQLite della casa (memoria a lungo termine, ex coinquilini)
+├── rag.py               indice dei documenti (da ricostruire a mano se cambiano) e ricerca
 ├── modelli.py           scelta del modello: Google Gemini o Ollama
 ├── config.py            tutte le impostazioni
 ├── valutazione.py       valutazione automatica (accuratezza, Hit Rate, MRR)

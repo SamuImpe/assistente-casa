@@ -10,6 +10,10 @@
 # - al centro: la chat; quando l'assistente vuole fare un'azione delicata,
 #   compare un riquadro per approvare, modificare o rifiutare
 
+import hashlib
+import json
+from datetime import date
+
 import pandas as pd
 import streamlit as st
 
@@ -17,9 +21,11 @@ import calcoli
 import config
 import modelli
 import strumenti
-from grafo import Assistente, crea_assistente, solo_dialogo
+from grafo import Assistente, crea_assistente, solo_dialogo, valuta_modifica_spesa
 
 st.set_page_config(page_title="Assistente di casa", page_icon="🏠", layout="wide")
+
+ETICHETTE_DECISIONI = {"approva": "✅ Approva", "modifica": "✏️ Modifica", "rifiuta": "❌ Rifiuta"}
 
 
 # Prepara l'assistente una sola volta per ogni provider e lo tiene pronto
@@ -37,20 +43,6 @@ def conversazione(assistente: Assistente, thread_id: str) -> list:
     return solo_dialogo(stato.values.get("messages", [])) if stato.values else []
 
 
-# Trasforma il testo delle quote ("Samu: 12" una per riga) in una lista di quote.
-# Se una riga è scritta male, segnala l'errore.
-def leggi_quote(testo: str) -> list[dict]:
-    quote = []
-    for riga in testo.splitlines():
-        if not riga.strip():
-            continue
-        if ":" not in riga:
-            raise ValueError(f"riga non valida: '{riga}' (usa il formato Nome: importo)")
-        nome, cifra = riga.split(":", 1)
-        quote.append({"nome": nome.strip(), "importo": float(cifra.strip().replace(",", "."))})
-    return quote
-
-
 # Manda un messaggio o una decisione all'assistente, mostrando un errore
 # comprensibile se qualcosa va storto (es. connessione o chiave non valida).
 def esegui(azione) -> None:
@@ -60,6 +52,60 @@ def esegui(azione) -> None:
     except Exception as errore:
         st.session_state["errore"] = str(errore)
     st.rerun()
+
+
+# Un codice breve che identifica una richiesta di conferma: serve a dare nomi diversi
+# ai campi dei moduli di richieste diverse (altrimenti Streamlit ricorderebbe
+# le scelte fatte nel modulo precedente).
+def firma(richiesta: dict) -> str:
+    return hashlib.md5(json.dumps(richiesta, sort_keys=True, default=str).encode()).hexdigest()[:8]
+
+
+# ---------------- FINESTRE DI CONFERMA (POPUP) ----------------
+
+# Conferma della modifica dell'elenco dei coinquilini, con le conseguenze per chi viene rimosso.
+# Chiudere la finestra con la X vale come "Annulla".
+@st.dialog("Confermi il nuovo elenco dei coinquilini?",
+           on_dismiss=lambda: st.session_state.pop("coinquilini_da_confermare", None))
+def popup_coinquilini(nomi: list[str]) -> None:
+    archivio = strumenti.archivio()
+    puliti, aggiunti, rimossi = archivio.differenze_coinquilini(nomi)
+    st.write(f"Nuovo elenco: **{', '.join(puliti)}**")
+    if aggiunti:
+        st.write(f"Aggiunti: {', '.join(aggiunti)}")
+    for persona in rimossi:
+        effetti = archivio.anteprima_rimozione(persona)
+        st.warning(
+            f"**{persona}** verrà rimosso (deve {calcoli.formatta_euro(effetti['deve'])} agli altri e deve ricevere "
+            f"{calcoli.formatta_euro(effetti['deve_ricevere'])}): "
+            f"i suoi debiti e crediti saranno cancellati, {effetti['annullati']} movimenti annullati e "
+            f"{effetti['ricalcolati']} spese ricalcolate per gli altri. Non potrà più essere usato nei conti."
+        )
+    colonna1, colonna2 = st.columns(2)
+    if colonna1.button("✅ Conferma", key="conferma_coinquilini", width="stretch"):
+        archivio.imposta_coinquilini(nomi)
+        st.session_state.pop("coinquilini_da_confermare", None)
+        st.rerun()
+    if colonna2.button("Annulla", key="annulla_coinquilini", width="stretch"):
+        st.session_state.pop("coinquilini_da_confermare", None)
+        st.rerun()
+
+
+# Conferma richiesta quando una persona sceglie "Modifica" ma non cambia niente:
+# l'azione si esegue (come proposta) solo cliccando "Conferma". Chiudere con la X vale come "Torna indietro".
+@st.dialog("Nessuna modifica apportata", on_dismiss=lambda: st.session_state.pop("invariata_da_confermare", None))
+def popup_nessuna_modifica(dati: dict) -> None:
+    st.write("Hai scelto **Modifica**, ma non hai cambiato niente in:")
+    for voce in dati["invariate"]:
+        st.write(f"- {voce}")
+    st.write("Vuoi confermare così com'è?")
+    colonna1, colonna2 = st.columns(2)
+    if colonna1.button("✅ Conferma", key="conferma_invariata", width="stretch"):
+        st.session_state.pop("invariata_da_confermare", None)
+        esegui(lambda: assistente.riprendi(dati["decisioni"], thread_id))
+    if colonna2.button("Torna indietro", key="annulla_invariata", width="stretch"):
+        st.session_state.pop("invariata_da_confermare", None)
+        st.rerun()
 
 
 # ---------------- BARRA LATERALE ----------------
@@ -88,12 +134,27 @@ except Exception as errore:
 archivio = strumenti.archivio()
 
 # Coinquilini: si possono scrivere e salvare direttamente da qui.
+# La prima volta si salvano subito; poi ogni cambiamento va confermato in una finestra.
 st.sidebar.subheader("👥 Coinquilini")
 nomi_attuali = ", ".join(archivio.coinquilini())
 nuovi_nomi = st.sidebar.text_input("Nomi separati da virgola", value=nomi_attuali)
-if st.sidebar.button("Salva coinquilini") and nuovi_nomi.strip():
-    archivio.imposta_coinquilini(nuovi_nomi.split(","))
-    st.rerun()
+if st.sidebar.button("Salva coinquilini"):
+    nomi = [nome for nome in nuovi_nomi.split(",") if nome.strip()]
+    _puliti, aggiunti, rimossi = archivio.differenze_coinquilini(nomi)
+    if not nomi:
+        st.sidebar.error("Scrivi almeno un nome.")
+    elif not archivio.coinquilini():
+        archivio.imposta_coinquilini(nomi)
+        st.rerun()
+    elif not aggiunti and not rimossi:
+        st.sidebar.info("Nessuna modifica apportata all'elenco.")
+    else:
+        st.session_state["coinquilini_da_confermare"] = nomi
+if st.session_state.get("coinquilini_da_confermare"):
+    popup_coinquilini(st.session_state["coinquilini_da_confermare"])
+ex = archivio.ex_coinquilini()
+if ex:
+    st.sidebar.caption(f"Ex coinquilini (non più utilizzabili): {', '.join(ex)}")
 
 coinquilini = archivio.coinquilini()
 if not coinquilini:
@@ -101,6 +162,7 @@ if not coinquilini:
     st.stop()
 
 # Chi sta scrivendo: serve all'assistente per capire chi è "io".
+# Si possono scegliere solo i coinquilini attuali.
 utente = st.sidebar.selectbox("✍️ Chi sta scrivendo?", coinquilini)
 
 # Ogni conversazione ha un identificativo (thread_id). Con "Nuova conversazione"
@@ -113,20 +175,17 @@ if st.sidebar.button("🆕 Nuova conversazione"):
 thread_id = st.session_state["thread_id"]
 st.sidebar.caption(f"Conversazione: `{thread_id}`")
 
-# Saldi e pagamenti consigliati, calcolati direttamente dal codice (senza modello).
-st.sidebar.subheader("💶 Saldi")
-saldi = archivio.saldi()
-if any(saldi.values()):
+# Debiti diretti (chi deve quanto a chi), calcolati direttamente dal codice (senza modello).
+st.sidebar.subheader("💶 Debiti")
+debiti = archivio.debiti()
+if debiti:
     st.sidebar.dataframe(
         pd.DataFrame(
-            [{"Persona": nome, "Saldo": calcoli.formatta_euro(valore),
-              "Stato": "deve ricevere" if valore > 0 else "deve dare" if valore < 0 else "in pari"}
-             for nome, valore in sorted(saldi.items(), key=lambda voce: -voce[1])]
+            [{"Chi deve": debitore, "A chi": creditore, "Quanto": calcoli.formatta_euro(cifra)}
+             for (debitore, creditore), cifra in sorted(debiti.items(), key=lambda voce: (voce[0][0], -voce[1]))]
         ),
         hide_index=True, width="stretch",
     )
-    for chi_paga, chi_riceve, cifra in calcoli.pagamenti_per_pareggiare(saldi):
-        st.sidebar.markdown(f"➡️ **{chi_paga}** dà **{calcoli.formatta_euro(cifra)}** a **{chi_riceve}**")
 else:
     st.sidebar.write("Siete tutti in pari.")
 
@@ -136,21 +195,24 @@ with st.sidebar.expander("🧾 Ultime spese"):
     if movimenti:
         st.dataframe(
             pd.DataFrame([{
-                "#": m["id"], "Data": m["data"], "Tipo": m["tipo"], "Descrizione": m["descrizione"],
-                "Importo": calcoli.formatta_euro(m["importo"]), "Pagato da": m["pagato_da"],
-                "Divisa tra": ", ".join(m["quote"]),
+                "#": m["id"], "Data": strumenti.formatta_data(m["data"]), "Tipo": m["tipo"],
+                "Descrizione": m["descrizione"], "Importo": calcoli.formatta_euro(m["importo"]),
+                "Pagato da": m["pagato_da"], "Divisa tra": ", ".join(m["quote"]), "Nota": m["nota"],
             } for m in movimenti]),
             hide_index=True,
         )
     else:
         st.write("Nessuna spesa registrata.")
 with st.sidebar.expander("📌 Regole della casa (memoria a lungo termine)"):
-    note = archivio.note()
-    st.write("\n".join(f"- {nota}" for nota in note) if note else "Nessuna regola salvata.")
+    note = archivio.note_con_id()
+    st.write("\n".join(f"- **#{nota['id']}** {nota['testo']}" for nota in note) if note else "Nessuna regola salvata.")
+    if note:
+        st.caption("Per cambiarle o cancellarle scrivi in chat, es. «cancella la regola #2».")
 with st.sidebar.expander("📨 Solleciti inviati (simulati)"):
     solleciti = archivio.solleciti()
     for s in solleciti:
-        st.markdown(f"**{s['data']} → {s['destinatario']}** ({calcoli.formatta_euro(s['importo'])}): {s['messaggio']}")
+        mittente = f"{s['mittente']} → " if s.get("mittente") else "→ "
+        st.markdown(f"**{s['data']} {mittente}{s['destinatario']}** ({calcoli.formatta_euro(s['importo'])}): {s['messaggio']}")
     if not solleciti:
         st.write("Nessun sollecito.")
 
@@ -159,8 +221,8 @@ with st.sidebar.expander("📨 Solleciti inviati (simulati)"):
 
 st.title("Assistente per coinquilini e fuorisede")
 st.caption(
-    "Esempi: «ho fatto la spesa al Carrefour, 54€, per tutti tranne Luca» · «chi deve soldi a chi?» · "
-    "«cancella la spesa della pizza» · «il proprietario può tenersi la caparra?»"
+    "Esempi: «ho fatto la spesa al Carrefour, 54€, per tutti tranne Luca» · «ieri pizza 20€ e birre 10€ per tutti» · "
+    "«chi deve soldi a chi?» · «tutti hanno saldato il debito con me» · «il proprietario può tenersi la caparra?»"
 )
 
 # Mostra un eventuale errore dell'ultima operazione.
@@ -174,79 +236,150 @@ for messaggio in conversazione(assistente, thread_id):
 
 richiesta = assistente.in_attesa(thread_id)
 
-# ---- Riquadro di conferma per una NUOVA SPESA ----
+# ---- Riquadro di conferma per le NUOVE SPESE (una decisione per ogni spesa) ----
 if richiesta and richiesta["tipo"] == "conferma_spesa":
-    spesa = richiesta["spesa"]
+    codice = firma(richiesta)
     with st.chat_message("assistant", avatar="🔒"):
-        st.markdown(f"**Confermi?** {richiesta['riepilogo']}")
-        with st.form("conferma_spesa"):
-            colonna1, colonna2, colonna3 = st.columns(3)
-            tipo = colonna1.selectbox("Tipo", ["spesa", "rimborso"], index=0 if spesa["tipo"] == "spesa" else 1)
-            pagato_da = colonna2.selectbox(
-                "Pagato da", coinquilini,
-                index=coinquilini.index(spesa["pagato_da"]) if spesa["pagato_da"] in coinquilini else 0,
-            )
-            importo = colonna3.number_input("Importo (€)", min_value=0.01, value=float(spesa["importo"]), step=0.5, format="%.2f")
-            descrizione = st.text_input("Descrizione", value=spesa["descrizione"])
-            partecipanti = st.multiselect(
-                "Divisa tra", coinquilini, default=[p for p in spesa["partecipanti"] if p in coinquilini]
-            )
-            testo_quote = st.text_area(
-                "Quote personalizzate (una per riga, «Nome: importo»; vuoto = parti uguali)",
-                value="\n".join(f"{q['nome']}: {q['importo']}" for q in spesa.get("quote") or []),
-            )
-            motivo = st.text_input("Motivo (solo se rifiuti)")
-            bottone1, bottone2, bottone3 = st.columns(3)
-            approva = bottone1.form_submit_button("✅ Approva", width="stretch")
-            modifica = bottone2.form_submit_button("✏️ Salva con le modifiche", width="stretch")
-            rifiuta = bottone3.form_submit_button("❌ Rifiuta", width="stretch")
-        if approva:
-            esegui(lambda: assistente.riprendi({"tipo": "approva"}, thread_id))
-        elif modifica:
-            try:
-                quote = leggi_quote(testo_quote)
-            except ValueError as errore:
-                st.error(str(errore))
-            else:
-                nuova = {
-                    "tipo": tipo, "pagato_da": pagato_da, "importo": importo, "descrizione": descrizione,
-                    "partecipanti": [q["nome"] for q in quote] if quote else partecipanti, "quote": quote,
-                }
-                esegui(lambda: assistente.riprendi({"tipo": "modifica", "spesa": nuova}, thread_id))
-        elif rifiuta:
-            esegui(lambda: assistente.riprendi({"tipo": "rifiuta", "motivo": motivo}, thread_id))
-
-# ---- Riquadro di conferma per AZIONI DELICATE dell'agente (eliminare, sollecitare) ----
-elif richiesta and richiesta["tipo"] == "azioni_sensibili":
-    with st.chat_message("assistant", avatar="🔒"):
-        st.markdown("**L'assistente vuole fare queste azioni. Decidi tu:**")
-        with st.form("azioni_sensibili"):
-            scelte = []
-            for numero, azione in enumerate(richiesta["richieste"]):
-                st.markdown(f"**{numero + 1}.** {azione['spiegazione']}")
+        for scartata in richiesta.get("scartate") or []:
+            st.warning(f"Non registrabile: {scartata}")
+        st.markdown("**Confermi?** Decidi per ogni spesa:")
+        with st.form(f"conferma_spesa_{codice}"):
+            campi = []
+            for numero, proposta in enumerate(richiesta["proposte"]):
+                spesa = proposta["spesa"]
+                chiave = f"{codice}_{numero}"
+                st.markdown(f"**{numero + 1}.** {proposta['riepilogo']}")
                 scelta = st.radio(
-                    "Decisione", azione["decisioni_ammesse"], key=f"scelta_{numero}", horizontal=True,
-                    format_func=lambda s: {"approva": "✅ Approva", "modifica": "✏️ Modifica", "rifiuta": "❌ Rifiuta"}[s],
+                    "Decisione", proposta["decisioni_ammesse"], key=f"scelta_{chiave}", horizontal=True,
+                    format_func=ETICHETTE_DECISIONI.get,
                 )
-                testo_nuovo = None
-                if "modifica" in azione["decisioni_ammesse"] and azione["strumento"] == "invia_sollecito":
-                    testo_nuovo = st.text_area(
-                        "Testo del sollecito (usato se scegli Modifica)",
-                        value=azione["argomenti"].get("messaggio", ""), key=f"testo_{numero}",
+                with st.expander("✏️ Dati da usare se scegli Modifica"):
+                    colonna1, colonna2, colonna3 = st.columns(3)
+                    tipo = colonna1.selectbox("Tipo", ["spesa", "rimborso"], index=0 if spesa["tipo"] == "spesa" else 1, key=f"tipo_{chiave}")
+                    pagato_da = colonna2.selectbox(
+                        "Pagato da", coinquilini, key=f"pagato_{chiave}",
+                        index=coinquilini.index(spesa["pagato_da"]) if spesa["pagato_da"] in coinquilini else 0,
                     )
-                motivo = st.text_input("Motivo (se rifiuti)", key=f"motivo_{numero}")
-                scelte.append((scelta, testo_nuovo, motivo))
+                    importo = colonna3.number_input(
+                        "Importo (€)", min_value=0.01, max_value=calcoli.IMPORTO_MASSIMO / 100,
+                        value=float(spesa["importo"]), step=0.5, format="%.2f", key=f"importo_{chiave}",
+                    )
+                    colonna4, colonna5 = st.columns(2)
+                    descrizione = colonna4.text_input("Descrizione", value=spesa["descrizione"], key=f"descrizione_{chiave}")
+                    giorno = colonna5.date_input(
+                        "Data del pagamento", value=date.fromisoformat(spesa["data"]), max_value=date.today(),
+                        format="DD/MM/YYYY", key=f"data_{chiave}",
+                    )
+                    partecipanti = st.multiselect(
+                        "Divisa tra", coinquilini, key=f"partecipanti_{chiave}",
+                        default=[p for p in spesa["partecipanti"] if p in coinquilini],
+                    )
+                    testo_quote = st.text_area(
+                        "Quote personalizzate (una per riga: «Nome: 12,50» oppure «Nome: 60%»; vuoto = parti uguali)",
+                        value="\n".join(f"{q['nome']}: {q['importo']}" for q in spesa.get("quote") or []),
+                        key=f"quote_{chiave}",
+                    )
+                motivo = st.text_input("Motivo (solo se rifiuti)", key=f"motivo_{chiave}")
+                campi.append((proposta, scelta, tipo, pagato_da, importo, descrizione, giorno, partecipanti, testo_quote, motivo))
             inviato = st.form_submit_button("Conferma le decisioni")
         if inviato:
-            decisioni = []
-            for scelta, testo_nuovo, motivo in scelte:
-                if scelta == "modifica":
-                    decisioni.append({"tipo": "modifica", "argomenti": {"messaggio": testo_nuovo or ""}})
+            decisioni, invariate, errori = [], [], []
+            for proposta, scelta, tipo, pagato_da, importo, descrizione, giorno, partecipanti, testo_quote, motivo in campi:
+                nome = proposta["spesa"]["descrizione"]
+                if scelta == "approva":
+                    decisioni.append({"tipo": "approva"})
                 elif scelta == "rifiuta":
                     decisioni.append({"tipo": "rifiuta", "motivo": motivo})
                 else:
-                    decisioni.append({"tipo": "approva"})
-            esegui(lambda: assistente.riprendi(decisioni, thread_id))
+                    try:
+                        quote = strumenti.leggi_quote(testo_quote.splitlines())
+                        if quote:
+                            calcoli.converti_quote(calcoli.leggi_importo(importo), quote)
+                    except ValueError as errore:
+                        errori.append(f"«{nome}»: {errore}. Inserisci quote valide.")
+                        continue
+                    nuova = {
+                        "tipo": tipo, "pagato_da": pagato_da, "importo": importo, "descrizione": descrizione.strip(),
+                        "partecipanti": [q["nome"] for q in quote] if quote else partecipanti, "quote": quote,
+                        "data": giorno.isoformat(),
+                    }
+                    esito = valuta_modifica_spesa(proposta["spesa"], nuova)
+                    if esito == "vuota":
+                        errori.append(f"«{nome}»: Modifica non valida (descrizione o partecipanti vuoti).")
+                    elif esito == "invariata":
+                        invariate.append(f"«{nome}»")
+                        decisioni.append({"tipo": "approva"})
+                    else:
+                        decisioni.append({"tipo": "modifica", "spesa": nuova})
+            if errori:
+                for errore in errori:
+                    st.error(errore)
+            elif invariate:
+                st.session_state["invariata_da_confermare"] = {"decisioni": decisioni, "invariate": invariate}
+            else:
+                esegui(lambda: assistente.riprendi(decisioni, thread_id))
+
+# ---- Riquadro di conferma per AZIONI DELICATE dell'agente (eliminare, sollecitare, ...) ----
+elif richiesta and richiesta["tipo"] == "azioni_sensibili":
+    codice = firma(richiesta)
+    with st.chat_message("assistant", avatar="🔒"):
+        st.markdown("**L'assistente vuole fare queste azioni. Decidi tu:**")
+        with st.form(f"azioni_sensibili_{codice}"):
+            scelte = []
+            for numero, azione in enumerate(richiesta["richieste"]):
+                chiave = f"{codice}_{numero}"
+                st.markdown(f"**{numero + 1}.** {azione['spiegazione']}")
+                scelta = st.radio(
+                    "Decisione", azione["decisioni_ammesse"], key=f"scelta_{chiave}", horizontal=True,
+                    format_func=ETICHETTE_DECISIONI.get,
+                )
+                campo = azione.get("campo_modificabile")
+                valore_nuovo = None
+                if "modifica" in azione["decisioni_ammesse"] and campo:
+                    originale = azione["argomenti"].get(campo)
+                    if campo == "nomi":
+                        valore_nuovo = st.text_input(
+                            "Coinquilini, separati da virgola (usato se scegli Modifica)",
+                            value=", ".join(originale or []), key=f"valore_{chiave}",
+                        )
+                    else:
+                        valore_nuovo = st.text_area(
+                            "Testo (usato se scegli Modifica)", value=originale or "", key=f"valore_{chiave}",
+                        )
+                motivo = st.text_input("Motivo (se rifiuti)", key=f"motivo_{chiave}")
+                scelte.append((azione, scelta, valore_nuovo, motivo))
+            inviato = st.form_submit_button("Conferma le decisioni")
+        if inviato:
+            decisioni, invariate, errori = [], [], []
+            for numero, (azione, scelta, valore_nuovo, motivo) in enumerate(scelte, start=1):
+                # Ogni decisione porta l'id dell'azione a cui si riferisce.
+                if scelta == "modifica":
+                    modifiche = {azione["campo_modificabile"]: valore_nuovo or ""}
+                    esito = strumenti.valuta_modifica(azione["strumento"], azione["argomenti"], modifiche)
+                    if esito == "vuota":
+                        errori.append(f"Azione {numero}: Modifica non valida (il testo non può essere vuoto).")
+                    elif esito == "invariata":
+                        invariate.append(f"azione {numero}")
+                        decisioni.append({"tipo": "approva", "id": azione["id"]})
+                    else:
+                        decisioni.append({"tipo": "modifica", "argomenti": modifiche, "id": azione["id"]})
+                elif scelta == "rifiuta":
+                    decisioni.append({"tipo": "rifiuta", "motivo": motivo, "id": azione["id"]})
+                else:
+                    decisioni.append({"tipo": "approva", "id": azione["id"]})
+            if errori:
+                for errore in errori:
+                    st.error(errore)
+            elif invariate:
+                st.session_state["invariata_da_confermare"] = {"decisioni": decisioni, "invariate": invariate}
+            else:
+                esegui(lambda: assistente.riprendi(decisioni, thread_id))
+
+# Finestra "Nessuna modifica apportata": l'azione parte solo con un clic su Conferma.
+if richiesta and st.session_state.get("invariata_da_confermare"):
+    popup_nessuna_modifica(st.session_state["invariata_da_confermare"])
+elif not richiesta:
+    st.session_state.pop("invariata_da_confermare", None)
 
 # ---- Casella per scrivere (disattivata mentre si attende una conferma) ----
 testo = st.chat_input(

@@ -24,7 +24,7 @@ from datetime import datetime
 
 import calcoli
 import config
-from grafo import controlla_spesa, estrai_spesa
+from grafo import controlla_spese, estrai_spesa
 
 # ---------------- DATI DI PROVA ----------------
 
@@ -81,14 +81,18 @@ DOMANDE_FUORI_TEMA = [
 
 # ---------------- PROVA 1: ESTRAZIONE ----------------
 
-# Confronta la spesa estratta con quella attesa, campo per campo.
+# Confronta le spese estratte con quella attesa, campo per campo.
+# Ogni frase di prova contiene UNA sola spesa: se ne vengono trovate di più (o nessuna) è un errore.
 # Restituisce un dizionario: per ogni campo, True se è giusto.
-def confronta(spesa: dict, problemi: list[str], atteso: dict) -> dict[str, bool]:
+def confronta(spese: list[dict], problemi: list[str], atteso: dict) -> dict[str, bool]:
     if atteso.get("ambigua"):
         return {"chiede_chiarimenti": bool(problemi)}
+    esito = {"nessun_problema": not problemi, "una_sola_spesa": len(spese) == 1}
+    if not spese:
+        return esito
+    spesa = spese[0]
     centesimi = calcoli.euro_in_centesimi
-    esito = {
-        "nessun_problema": not problemi,
+    esito |= {
         "tipo": spesa["tipo"] == atteso["tipo"],
         "pagato_da": spesa["pagato_da"] == atteso["pagato_da"],
         "importo": spesa["importo"] is not None and centesimi(spesa["importo"]) == centesimi(atteso["importo"]),
@@ -106,12 +110,12 @@ def valuta_estrazione(modello, casi=CASI_ESTRAZIONE) -> dict:
     dettagli = []
     for frase, atteso in casi:
         try:
-            estratta = estrai_spesa(modello, frase, COINQUILINI_PROVA, UTENTE_PROVA)
-            spesa, problemi = controlla_spesa(estratta, COINQUILINI_PROVA, UTENTE_PROVA)
-            campi = confronta(spesa, problemi, atteso)
+            estratte = estrai_spesa(modello, frase, COINQUILINI_PROVA, UTENTE_PROVA)
+            spese, problemi = controlla_spese(estratte, COINQUILINI_PROVA, UTENTE_PROVA)
+            campi = confronta(spese, problemi, atteso)
         except Exception as errore:  # un errore conta come risposta sbagliata
-            spesa, problemi, campi = None, [f"errore: {errore}"], {"senza_errori": False}
-        dettagli.append({"frase": frase, "atteso": atteso, "ottenuto": spesa, "problemi": problemi,
+            spese, problemi, campi = None, [f"errore: {errore}"], {"senza_errori": False}
+        dettagli.append({"frase": frase, "atteso": atteso, "ottenuto": spese, "problemi": problemi,
                          "campi": campi, "corretto": all(campi.values())})
     corretti = sum(d["corretto"] for d in dettagli)
     return {"totale": len(dettagli), "corretti": corretti, "accuratezza": corretti / len(dettagli), "dettagli": dettagli}

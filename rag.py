@@ -9,12 +9,13 @@
 #    domanda -> trasformata in numeri -> si trovano i pezzi più simili
 #    -> si passano al modello insieme alla domanda
 #
-# Si può eseguire anche da solo per (ri)costruire l'indice:
+# L'indice NON si aggiorna da solo quando cambiano i documenti: ogni volta che
+# un documento viene aggiunto, modificato o tolto va ricostruito a mano, eseguendo
+# questo file (e poi riavviando l'assistente):
 #     python rag.py            (usa il provider scritto nel file .env)
 #     python rag.py ollama     (per il modello locale)
 
 import json
-import shutil
 import sys
 from pathlib import Path
 
@@ -83,24 +84,32 @@ def cartella_indice(provider: str) -> Path:
     return config.CARTELLA_DATI / f"indice_{provider}"
 
 
-# Costruisce (o ricostruisce da zero) l'indice dei documenti.
-# Salva anche un piccolo file che dice con quale modello di embedding
-# è stato costruito, per accorgersi se in futuro si cambia modello.
-def costruisci_indice(embedding: Embeddings, cartella: Path, info_modello: dict | None = None,
-                      cartella_documenti: Path = config.CARTELLA_DOCUMENTI) -> int:
-    if cartella.exists():
-        shutil.rmtree(cartella)
-    cartella.mkdir(parents=True)
-    pezzi = dividi_in_pezzi(carica_documenti(cartella_documenti))
-    if not pezzi:
-        raise ValueError(f"Nessun documento trovato in {cartella_documenti}")
-    archivio_vettori = Chroma(
+# Apre (o crea) l'archivio dei vettori in una cartella.
+def _apri_vettori(embedding: Embeddings, cartella: Path) -> Chroma:
+    return Chroma(
         collection_name=NOME_COLLEZIONE,
         embedding_function=embedding,
         persist_directory=str(cartella),
         collection_metadata={"hnsw:space": "cosine"},
         client_settings=IMPOSTAZIONI_CHROMA,
+        # Trasforma la "distanza" tra due testi in un punteggio di somiglianza
+        # da 0 (niente in comune) a 1 (identici).
+        relevance_score_fn=lambda distanza: 1.0 - distanza,
     )
+
+
+# Costruisce (o ricostruisce da zero) l'indice dei documenti e restituisce il numero di pezzi.
+# Salva anche un piccolo file che dice con quale modello di embedding
+# è stato costruito, per accorgersi se in futuro si cambia modello.
+def costruisci_indice(embedding: Embeddings, cartella: Path, info_modello: dict | None = None,
+                      cartella_documenti: Path = config.CARTELLA_DOCUMENTI) -> int:
+    pezzi = dividi_in_pezzi(carica_documenti(cartella_documenti))
+    if not pezzi:
+        raise ValueError(f"Nessun documento trovato in {cartella_documenti}")
+    cartella.mkdir(parents=True, exist_ok=True)
+    archivio_vettori = _apri_vettori(embedding, cartella)
+    # Svuota l'indice precedente (anche se fatto con un altro modello) e lo riempie da capo.
+    archivio_vettori.reset_collection()
     archivio_vettori.add_documents(pezzi, ids=[f"pezzo-{numero}" for numero in range(len(pezzi))])
     (cartella / "info_indice.json").write_text(
         json.dumps({**(info_modello or {}), "numero_pezzi": len(pezzi)}, ensure_ascii=False, indent=2),
@@ -117,16 +126,7 @@ class RicercaDocumenti:
                  numero_pezzi: int = config.RAG_NUMERO_PEZZI, soglia: float = config.RAG_SOGLIA_RILEVANZA):
         self.numero_pezzi = numero_pezzi
         self.soglia = soglia
-        self.archivio_vettori = Chroma(
-            collection_name=NOME_COLLEZIONE,
-            embedding_function=embedding,
-            persist_directory=str(cartella),
-            collection_metadata={"hnsw:space": "cosine"},
-            client_settings=IMPOSTAZIONI_CHROMA,
-            # Trasforma la "distanza" tra due testi in un punteggio di somiglianza
-            # da 0 (niente in comune) a 1 (identici).
-            relevance_score_fn=lambda distanza: 1.0 - distanza,
-        )
+        self.archivio_vettori = _apri_vettori(embedding, Path(cartella))
 
     # Cerca i pezzi più simili alla domanda e tiene solo quelli abbastanza
     # pertinenti (sopra la soglia). Se nessun pezzo supera la soglia restituisce
@@ -154,6 +154,7 @@ def etichetta_fonte(documento: Document) -> str:
 
 # Apre l'indice per il provider indicato; se non esiste ancora (o è stato fatto
 # con un altro modello di embedding) lo costruisce prima.
+# Se invece sono cambiati i documenti NON lo aggiorna: va ricostruito a mano con "python rag.py".
 def prepara_ricerca(provider: str) -> RicercaDocumenti:
     import modelli
 

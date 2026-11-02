@@ -29,9 +29,14 @@ class ModelloFinto(BaseChatModel):
 
     # Prende la prossima risposta della scaletta; se è finita, il test fallisce
     # (significa che il programma ha chiamato il modello più volte del previsto).
+    # Se nella scaletta c'è un errore (es. ConnectionError), lo "lancia": così si simula
+    # un modello che non risponde.
     def _prossima(self):
         assert self.risposte, "Il modello è stato chiamato più volte del previsto"
-        return self.risposte.pop(0)
+        risposta = self.risposte.pop(0)
+        if isinstance(risposta, Exception):
+            raise risposta
+        return risposta
 
     # Risposta "normale" (testo o richiesta di strumenti).
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):

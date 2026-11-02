@@ -1,6 +1,8 @@
 # Test della parte RAG: preparazione dell'indice e ricerca nei documenti veri del progetto,
 # usando l'embedding finto (senza internet).
 
+import json
+
 import pytest
 
 import rag
@@ -55,3 +57,26 @@ def test_formatta_contesto(ricerca):
     testo = rag.formatta_contesto(ricerca("deposito cauzionale interessi"))
     assert testo.startswith("[1] Fonte: ")
     assert "-----" in testo
+
+
+# L'indice NON si aggiorna da solo: un documento modificato si trova solo dopo
+# averlo ricostruito a mano (come fa "python rag.py").
+def test_aggiornamento_manuale_indice(tmp_path):
+    import shutil
+
+    import config
+
+    documenti = tmp_path / "documenti"
+    shutil.copytree(config.CARTELLA_DOCUMENTI, documenti)
+    cartella = tmp_path / "indice"
+    rag.costruisci_indice(EmbeddingFinto(), cartella, {"embedding": "finto"}, documenti)
+    (documenti / "09_wifi.md").write_text("# Wi-Fi\nLa password del router di casa si trova sotto il frigorifero.\n", encoding="utf-8")
+
+    def trova_wifi():
+        risultati = rag.RicercaDocumenti(EmbeddingFinto(), cartella, soglia=0.2)("password router frigorifero")
+        return any(d.metadata["fonte"] == "09_wifi.md" for d, _ in risultati)
+
+    assert not trova_wifi()
+    rag.costruisci_indice(EmbeddingFinto(), cartella, {"embedding": "finto"}, documenti)
+    assert trova_wifi()
+    assert json.loads((cartella / "info_indice.json").read_text(encoding="utf-8"))["embedding"] == "finto"
