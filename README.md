@@ -7,7 +7,7 @@ Assistente basato su LLM per chi vive in affitto con altri:
 - **tiene i conti di casa**: capisce spese scritte in modo normale, anche più di una per messaggio, con date ("ieri") e divisioni in percentuale ("ho fatto la spesa, 54€, tutti tranne Luca"); calcola chi deve quanto a chi, i debiti tra due persone e i totali spesi; registra i debiti saldati, elimina spese sbagliate e prepara solleciti (simulati), chiedendo sempre conferma prima delle azioni delicate (anche per cambiare i coinquilini o le regole della casa);
 - **risponde a domande** su affitto, contratti, caparra, bollette, condominio e convivenza, cercando in 8 documenti e citando le fonti.
 
-Le scelte progettuali, con motivazioni e alternative scartate, sono in **[DECISIONI.md](DECISIONI.md)**.
+Il funzionamento della logica, la struttura del progetto e le scelte progettuali (con motivazioni e alternative scartate) sono descritti nel **[documento tecnico](DOCUMENTO_TECNICO.pdf)**; il diario delle scelte è in **[DECISIONI.md](DECISIONI.md)**.
 
 ---
 
@@ -109,26 +109,7 @@ LANGSMITH_PROJECT=assistente-casa
 
 ## Struttura del progetto
 
-```
-assistente-casa/
-├── app_streamlit.py     interfaccia web
-├── main.py              versione da terminale
-├── grafo.py             il cuore: grafo LangGraph con i 4 percorsi, memoria e conferme
-├── prompt.py            tutte le istruzioni per il modello (few-shot, ruoli, RAG)
-├── schemi.py            le "schede" per l'output strutturato
-├── strumenti.py         gli strumenti (tool) e le regole sulle azioni delicate
-├── calcoli.py           conti esatti: quote, percentuali, debiti diretti tra persone
-├── archivio.py          archivio SQLite della casa (memoria a lungo termine, ex coinquilini)
-├── rag.py               indice dei documenti (da ricostruire a mano se cambiano) e ricerca
-├── modelli.py           scelta del modello: Google Gemini o Ollama
-├── config.py            tutte le impostazioni
-├── valutazione.py       valutazione automatica (accuratezza, Hit Rate, MRR)
-├── documenti/           gli 8 documenti consultati dall'assistente
-├── tests/               test automatici con modello finto
-├── DECISIONI.md         diario delle scelte progettuali
-├── requirements.txt     librerie necessarie
-└── .env.example         modello del file di configurazione
-```
+La struttura dei file e il ruolo di ogni modulo sono descritti nel **[documento tecnico](DOCUMENTO_TECNICO.pdf)** (capitolo 2).
 
 I dati (archivio spese, indici dei documenti, risultati delle valutazioni) vengono creati nella cartella `dati/`, che non va caricata su Git. Per ricominciare da zero basta cancellarla.
 
