@@ -7,7 +7,7 @@ Assistente basato su LLM per chi vive in affitto con altri:
 - **tiene i conti di casa**: capisce spese scritte in modo normale, anche più di una per messaggio, con date ("ieri") e divisioni in percentuale ("ho fatto la spesa, 54€, tutti tranne Luca"); calcola chi deve quanto a chi, i debiti tra due persone e i totali spesi; registra i debiti saldati, elimina spese sbagliate e prepara solleciti (simulati), chiedendo sempre conferma prima delle azioni delicate (anche per cambiare i coinquilini o le regole della casa);
 - **risponde a domande** su affitto, contratti, caparra, bollette, condominio e convivenza, cercando in 8 documenti e citando le fonti.
 
-Il funzionamento della logica, la struttura del progetto e le scelte progettuali (con motivazioni e alternative scartate) sono descritti nel **[documento tecnico](DOCUMENTO_TECNICO.pdf)**; il diario delle scelte è in **[DECISIONI.md](DECISIONI.md)**.
+Il funzionamento della logica, la struttura del progetto e le scelte progettuali (con motivazioni e alternative scartate) sono descritti nel **[documento tecnico](DOCUMENTO_TECNICO.pdf)**.
 
 ---
 
