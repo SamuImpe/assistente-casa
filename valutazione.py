@@ -1,6 +1,4 @@
-# Piccola VALUTAZIONE AUTOMATICA dell'assistente.
-# "Sembra funzionare" non è una misura: qui facciamo delle prove con risposte
-# già note e contiamo quante volte l'assistente fa giusto.
+# VALUTAZIONE AUTOMATICA dell'assistente.
 #
 # Due prove separate (come suggerito per il RAG: ricerca e generazione si valutano a parte):
 # 1. ESTRAZIONE DELLE SPESE: 20 frasi scritte in modo informale, con la scheda corretta.

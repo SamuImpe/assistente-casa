@@ -1,8 +1,7 @@
-# Versione "da terminale" dell'assistente: si scrive e si legge nella finestra nera
-# del computer, senza interfaccia grafica. Utile per provare velocemente.
+# Versione "da terminale" dell'assistente
 #
 # Come si avvia:
-#     python main.py                  (usa il provider scritto nel file .env)
+#     python main.py (usa il provider scritto nel file .env)
 #     python main.py --provider ollama
 #
 # Comandi speciali durante la chat:

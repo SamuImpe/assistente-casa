@@ -1,8 +1,8 @@
 # 🏠 Assistente per coinquilini e fuorisede
 
-Progetto finale del corso **Agenti AI: automazione e sviluppo** (ITS ICT Academy Piemonte, Gen AI Specialist).
+Progetto finale del corso **Agenti AI: automazione e sviluppo**
 
-Un assistente basato su LLM per chi vive in affitto con altri:
+Assistente basato su LLM per chi vive in affitto con altri:
 
 - **tiene i conti di casa**: capisce spese scritte in modo normale ("ho fatto la spesa, 54€, tutti tranne Luca"), calcola chi deve quanto a chi, elimina spese sbagliate e prepara solleciti (simulati), chiedendo sempre conferma prima delle azioni delicate;
 - **risponde a domande** su affitto, contratti, caparra, bollette, condominio e convivenza, cercando in 8 documenti e citando le fonti.
@@ -13,7 +13,7 @@ Le scelte progettuali, con motivazioni e alternative scartate, sono in **[DECISI
 
 ## Requisiti
 
-- Python **3.10 o successivo** (provato con 3.13)
+- Python **3.10 o successivo**
 - Una **chiave API di Google Gemini** (gratuita: https://aistudio.google.com/apikey), oppure **Ollama** per usare un modello sul proprio computer
 
 ## Installazione
@@ -24,13 +24,17 @@ cd assistente-casa
 
 # 2. Crea e attiva un ambiente virtuale
 python -m venv venv
-source venv/bin/activate          # su Windows: venv\Scripts\activate
+source venv/bin/activate
+# su Windows:
+venv\Scripts\activate
 
 # 3. Installa le librerie
 pip install -r requirements.txt
 
 # 4. Prepara il file di configurazione
-cp .env.example .env              # su Windows: copy .env.example .env
+cp .env.example .env
+# su Windows:
+copy .env.example .env
 ```
 
 Apri `.env` e scrivi la tua chiave in `GOOGLE_API_KEY=...`.
@@ -70,7 +74,9 @@ Si apre il browser su http://localhost:8501. Al primo avvio l'assistente indiciz
 ### Versione da terminale
 
 ```bash
-python main.py                    # oppure: python main.py --provider ollama
+python main.py
+# oppure:
+python main.py --provider ollama
 ```
 
 Comandi: `/saldi`, `/nuova` (nuova conversazione), `/chi` (cambia utente), `/esci`.
@@ -78,9 +84,9 @@ Comandi: `/saldi`, `/nuova` (nuova conversazione), `/chi` (cambia utente), `/esc
 ### Altri comandi utili
 
 ```bash
-python rag.py                     # ricostruisce l'indice dei documenti (dopo averli modificati)
-python valutazione.py             # valutazione automatica: estrazione spese + ricerca nei documenti
-python -m pytest -q               # 45 test automatici (non serve la chiave API)
+python rag.py  # ricostruisce l'indice dei documenti (dopo averli modificati)
+python valutazione.py   # valutazione automatica: estrazione spese + ricerca nei documenti
+python -m pytest -q  # 45 test automatici (non serve la chiave API)
 ```
 
 ### LangSmith (facoltativo)
@@ -128,9 +134,3 @@ messaggio → SMISTA ─┬─ nuova spesa  → ESTRAI (few-shot + output strutt
                     ├─ domanda_info → CERCA NEI DOCUMENTI (RAG) → risposta con fonti
                     └─ altro        → risposta breve
 ```
-
-## Avvertenze
-
-- Le informazioni su leggi e tasse sono **sintesi didattiche aggiornate a ottobre 2026**: non sono una consulenza legale o fiscale.
-- I documenti 6, 7 e 8 (contratto, regolamento di condominio, regolamento di casa) sono **inventati**.
-- I solleciti di pagamento sono **simulati**: non viene inviato nessun messaggio.
